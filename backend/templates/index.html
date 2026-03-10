@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>College Bus Transport Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=1.2">
+    <!-- Real AI OCR Engine -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+
+<body class="dark-theme">
+    <!-- Login Modal -->
+    <div id="loginModal" class="login-overlay">
+        <div class="login-box">
+            <div class="login-header">
+                <span class="bus-badge">🚌 SYSTEM LOGIN</span>
+                <h1>UniTransit Admin</h1>
+                <p>Eicher Fleet Monitoring Hub</p>
+            </div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Admin ID</label>
+                    <input type="text" id="adminId" placeholder="" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="adminPassword" placeholder="" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Enter Dashboard</button>
+            </form>
+            <div class="login-footer">
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Content -->
+    <div id="app" style="display: none;">
+        <nav class="navbar">
+            <div class="nav-logo">
+                <span class="logo-icon">🚌</span>
+                <span class="logo-text">UniTransit <span class="admin-badge">Admin</span></span>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-view="bus-entry">Monitoring</li>
+                <li data-view="edit-bus-list">Manage Fleet</li>
+                <li data-view="admin-panel" class="special-nav">Admin Panel</li>
+            </ul>
+            <div class="user-profile">
+                <span class="user-info">Logged in: <b id="loggedUser">admin</b></span>
+                <button class="logout-btn" id="logoutBtn">Logout</button>
+            </div>
+        </nav>
+
+        <main class="content-container">
+            <!-- Monitoring View -->
+            <section id="bus-entry-view" class="view active">
+                <div class="hero-section">
+                    <div class="hero-content">
+                        <h1>Smart Transit Gateway</h1>
+                        <p>Real-time AI surveillance & automated fleet tracking</p>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <!-- Scanner Module -->
+                    <div class="card scanner-card">
+                        <div class="card-header">
+                            <span class="status-indicator live">LIVE CAMERA</span>
+                            <div class="mode-toggle">
+                                <span class="active" id="modeEntry">ENTRY</span>
+                                <span id="modeExit">EXIT</span>
+                                <label class="mirror-toggle">
+                                    <input type="checkbox" id="mirrorAI"> Mirror Mode
+                                </label>
+                            </div>
+                        </div>
+                        <div class="scanner-viewport">
+                            <video id="videoFeed" autoplay playsinline muted></video>
+                            <div class="scan-overlay">
+                                <div class="focus-box"></div>
+                                <div class="scan-line"></div>
+                            </div>
+                        </div>
+                        <div class="scanner-controls">
+                            <button id="simulateScan" class="btn btn-primary">⚡ SCAN VEHICLE NOW</button>
+                        </div>
+
+                        <div class="scan-details" id="currentScan">
+                            <div class="bus-profile-header">
+                                <div class="bus-avatar">🚌</div>
+                                <div class="bus-main-status">
+                                    <h3 id="detectedBusTitle">Analyzing Vehicle...</h3>
+                                    <p id="scanStatus">Waiting for next scan...</p>
+                                </div>
+                            </div>
+                            <div class="scan-info-row">
+                                <span class="label">Number Plate</span>
+                                <span class="value plate-badge" id="scannedPlate">--</span>
+                            </div>
+                            <div class="scan-info-row">
+                                <span class="label">Serial / Route</span>
+                                <span class="value" id="busRouteInfo">--</span>
+                            </div>
+                            <div class="scan-info-row">
+                                <span class="label">Responsible Driver</span>
+                                <span class="value" id="busDriverName">--</span>
+                            </div>
+                            <div class="scan-info-row">
+                                <span class="label">Seating Capacity</span>
+                                <span class="value" id="busCapacity">--</span>
+                            </div>
+                        </div>
+
+                        <div class="scanner-actions">
+                            <button id="simulateScan" class="btn btn-primary">Trigger AI Scanner (Simulation)</button>
+                        </div>
+                    </div>
+
+                    <!-- Tracking Column -->
+                    <div class="tracking-column">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <span class="stat-label">Buses In Campus</span>
+                                <span class="stat-value" id="countInside">0</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Total Entries</span>
+                                <span class="stat-value" id="countTotalEntries">0</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Total Exits</span>
+                                <span class="stat-value" id="countTotalExits">0</span>
+                            </div>
+                        </div>
+
+                        <div class="card live-status-card">
+                            <div class="card-header">
+                                <h2>Transport Status</h2>
+                            </div>
+                            <div class="status-split">
+                                <div class="status-column">
+                                    <h3 class="status-title in">In Campus (<span id="inCampusBadge">0</span>)</h3>
+                                    <div class="live-fleet-list" id="liveFleetList">
+                                        <p class="empty-state">Loading...</p>
+                                    </div>
+                                </div>
+                                <div class="status-column">
+                                    <h3 class="status-title out">Outside/Expected (<span id="outCampusBadge">0</span>)
+                                    </h3>
+                                    <div class="live-fleet-out-list" id="liveFleetOutList">
+                                        <p class="empty-state">All buses inside</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card-header">
+                            <h2>Recent Movements (<span id="currentDateDisplay">--</span>)</h2>
+                            <button id="exportLogs" class="btn btn-secondary btn-small">Export Report</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table" id="busLogTable">
+                                <thead>
+                                    <tr>
+                                        <th>Action</th>
+                                        <th>Plate</th>
+                                        <th>Serial</th>
+                                        <th>Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+    </div>
+    </section>
+
+    <!-- Manage Fleet View -->
+    <section id="edit-bus-list-view" class="view">
+        <div class="view-header">
+            <h1>Fleet Management</h1>
+            <p class="subtitle">Search, modify, or add vehicles to the database</p>
+        </div>
+        <!-- ... Content for Fleet ... -->
+        <div class="admin-grid-two">
+            <div class="card form-card">
+                <form id="addBusForm" class="admin-form">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Plate Number</label><input type="text"
+                                placeholder="TN-00-XX-0000" required></div>
+                        <div class="form-group"><label>Serial Number</label><input type="text" placeholder="e.g. B-01"
+                                required></div>
+                        <div class="form-group"><label>Assigned Route</label><input type="text"
+                                placeholder="Chennai to CBE" required></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save New Vehicle</button>
+                </form>
+            </div>
+            <div class="card fleet-card">
+                <table class="data-table" id="fleetTable">
+                    <thead>
+                        <tr>
+                            <th>Plate</th>
+                            <th>ID</th>
+                            <th>Route</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Admin Panel View -->
+    <section id="admin-panel-view" class="view">
+        <div class="view-header">
+            <h1>Admin Dashboard</h1>
+            <p>Hardware and Staff User Administration</p>
+        </div>
+        <div class="admin-grid">
+            <div class="card admin-card">
+                <div class="card-header">
+                    <h2>🔍 Scanner Nodes</h2>
+                </div>
+                <form id="addScannerForm" class="admin-form">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Name</label><input type="text" id="scannerName"
+                                placeholder="Main Gate" required></div>
+                        <div class="form-group"><label>Location</label><input type="text" id="scannerLocation"
+                                placeholder="Gate A" required></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Register Node</button>
+                </form>
+                <div id="scannersList" class="items-list"></div>
+            </div>
+
+            <div class="card admin-card">
+                <div class="card-header">
+                    <h2>👤 System Admins</h2>
+                </div>
+                <form id="createAdminForm" class="admin-form">
+                    <div class="form-grid">
+                        <div class="form-group"><label>ID</label><input type="text" id="newAdminId" required>
+                        </div>
+                        <div class="form-group"><label>Secret</label><input type="password" id="newAdminPassword"
+                                required></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Admin</button>
+                </form>
+                <div id="adminUsersList" class="items-list"></div>
+            </div>
+        </div>
+    </section>
+    </main>
+    <div id="notification-area"></div>
+    </div>
+    <script type="module" src="/static/main.js?v=1.2"></script>
+</body>
+
+</html>

@@ -1,0 +1,545 @@
+// ==================== AUTHENTICATION SYSTEM ====================
+let currentAdmin = null;
+
+// Default admin credentials - will be initialized in DOMContentLoaded
+let admins = [];
+
+function saveAdmins() {
+    localStorage.setItem('admin_users', JSON.stringify(admins));
+}
+
+function handleLogin(e) {
+    e.preventDefault();
+    const adminId = document.getElementById('adminId').value;
+    const adminPassword = document.getElementById('adminPassword').value;
+
+    const user = admins.find(a => a.id === adminId && a.password === adminPassword);
+    
+    if (user) {
+        currentAdmin = user;
+        localStorage.setItem('currentAdmin', JSON.stringify(user));
+        document.getElementById('loginModal').classList.add('hidden');
+        document.getElementById('app').style.display = 'block';
+        document.getElementById('loggedUser').innerText = user.id;
+        document.getElementById('loginForm').reset();
+        showNotification(`Welcome ${user.id}!`, 'success');
+        initializeApp();
+    } else {
+        showNotification('Invalid Admin ID or Password', 'error');
+    }
+}
+
+function handleLogout() {
+    if (confirm('Are you sure you want to logout?')) {
+        currentAdmin = null;
+        localStorage.removeItem('currentAdmin');
+        document.getElementById('loginModal').classList.remove('hidden');
+        document.getElementById('app').style.display = 'none';
+        document.getElementById('loginForm').reset();
+    }
+}
+
+function checkAuth() {
+    const stored = localStorage.getItem('currentAdmin');
+    if (stored) {
+        try {
+            currentAdmin = JSON.parse(stored);
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('app').style.display = 'block';
+            document.getElementById('loggedUser').innerText = currentAdmin.id;
+            initializeApp();
+        } catch (e) {
+            localStorage.removeItem('currentAdmin');
+            document.getElementById('loginModal').classList.remove('hidden');
+            document.getElementById('app').style.display = 'none';
+        }
+    } else {
+        document.getElementById('loginModal').classList.remove('hidden');
+        document.getElementById('app').style.display = 'none';
+    }
+}
+
+// ==================== STATE MANAGEMENT ====================
+let logs = JSON.parse(localStorage.getItem('transit_logs')) || [];
+let fleet = JSON.parse(localStorage.getItem('transit_fleet')) || [
+    { plate: 'TN-29 BC-2341', serial: 'B90', route: 'Dharmapuri', driver: 'M. Senthil', phone: '98450 12345', capacity: '55 Seats' },
+    { plate: 'TN-30 AC-1122', serial: 'B45', route: 'Salem', driver: 'R. Kumar', phone: '97890 23456', capacity: '48 Seats' },
+    { plate: 'TN-24 BD-5566', serial: 'B12', route: 'Hosur', driver: 'P. Ravi', phone: '94433 34567', capacity: '60 Seats' }
+];
+
+let scannedRecords = JSON.parse(localStorage.getItem('scanned_records')) || [];
+let scanners = JSON.parse(localStorage.getItem('scanner_list')) || [
+    { id: 'SC001', name: 'Gate 1 Scanner', location: 'Main Gate', status: 'Active', added: new Date().toLocaleDateString() }
+];
+
+let inCampusPlates = new Set(JSON.parse(localStorage.getItem('in_campus_plates')) || []);
+let currentMode = 'ENTRY';
+
+// ==================== DOM ELEMENTS ====================
+const navLinks = document.querySelectorAll('.nav-links li[data-view]');
+const views = document.querySelectorAll('.view');
+const videoFeed = document.getElementById('videoFeed');
+const busLogTableBody = document.querySelector('#busLogTable tbody');
+const fleetTableBody = document.querySelector('#fleetTable tbody');
+const liveFleetList = document.getElementById('liveFleetList');
+
+const countInside = document.getElementById('countInside');
+const countTotalEntries = document.getElementById('countTotalEntries');
+const countTotalExits = document.getElementById('countTotalExits');
+const inCampusBadge = document.getElementById('inCampusBadge');
+
+const scanStatus = document.getElementById('scanStatus');
+const scannedPlate = document.getElementById('scannedPlate');
+const busRouteInfo = document.getElementById('busRouteInfo');
+const busDriverName = document.getElementById('busDriverName');
+const busCapacity = document.getElementById('busCapacity');
+const currentDateDisplay = document.getElementById('currentDateDisplay');
+
+const modeEntry = document.getElementById('modeEntry');
+const modeExit = document.getElementById('modeExit');
+const simulateBtn = document.getElementById('simulateScan');
+const addBusForm = document.getElementById('addBusForm');
+const logoutBtn = document.getElementById('logoutBtn');
+
+// ==================== INITIALIZATION ====================
+function initializeApp() {
+    setupEventListeners();
+    checkDailyReset();
+    updateUI();
+    updateFleetTable();
+    updateAdminPanel();
+    initCamera();
+}
+
+function setupEventListeners() {
+    // View Navigation
+    navLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            const viewId = link.getAttribute('data-view');
+            navLinks.forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            views.forEach(v => v.classList.remove('active'));
+            document.getElementById(`${viewId}-view`).classList.add('active');
+            if (viewId === 'bus-entry') initCamera();
+            if (viewId === 'admin-panel') updateAdminPanel();
+        });
+    });
+
+    // Login Form
+    document.getElementById('loginForm').addEventListener('submit', handleLogin);
+
+    // Logout
+    logoutBtn.addEventListener('click', handleLogout);
+
+    // Mode Selection
+    if (modeEntry) {
+        modeEntry.addEventListener('click', () => {
+            currentMode = 'ENTRY';
+            modeEntry.classList.add('active');
+            modeExit.classList.remove('active');
+        });
+    }
+
+    if (modeExit) {
+        modeExit.addEventListener('click', () => {
+            currentMode = 'EXIT';
+            modeExit.classList.add('active');
+            modeEntry.classList.remove('active');
+        });
+    }
+
+    // Bus Form
+    addBusForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const inputs = e.target.querySelectorAll('input');
+        const newBus = {
+            plate: inputs[0].value.toUpperCase(),
+            serial: inputs[1].value.toUpperCase(),
+            route: inputs[2].value
+        };
+
+        if (fleet.some(b => b.plate === newBus.plate)) {
+            showNotification('Bus already exists in fleet!', 'error');
+            return;
+        }
+
+        fleet.push(newBus);
+        saveData();
+        updateFleetTable();
+        e.target.reset();
+        showNotification('New bus added to fleet.');
+    });
+
+    // Scanner Management
+    document.getElementById('addScannerForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('scannerName').value;
+        const location = document.getElementById('scannerLocation').value;
+        
+        const newScanner = {
+            id: 'SC' + String(Date.now()).slice(-5),
+            name: name,
+            location: location,
+            status: 'Active',
+            added: new Date().toLocaleDateString()
+        };
+        
+        scanners.push(newScanner);
+        saveData();
+        updateAdminPanel();
+        e.target.reset();
+        showNotification('Scanner added successfully');
+    });
+
+    // Create Admin User
+    document.getElementById('createAdminForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const newId = document.getElementById('newAdminId').value;
+        const newPassword = document.getElementById('newAdminPassword').value;
+
+        if (admins.some(a => a.id === newId)) {
+            showNotification('Admin ID already exists!', 'error');
+            return;
+        }
+
+        admins.push({
+            id: newId,
+            password: newPassword,
+            name: newId,
+            created: new Date().toLocaleDateString()
+        });
+
+        saveAdmins();
+        updateAdminPanel();
+        e.target.reset();
+        showNotification('New admin user created successfully');
+    });
+
+    simulateBtn.addEventListener('click', triggerDetection);
+}
+
+// ==================== CAMERA & SCANNING ====================
+async function initCamera() {
+    try {
+        if (!videoFeed) return;
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment' } 
+        });
+        videoFeed.srcObject = stream;
+        if (scanStatus) scanStatus.innerText = 'Scanning for Plates...';
+    } catch (err) {
+        console.log('Camera not available - using demo mode');
+        if (scanStatus) scanStatus.innerText = 'Demo Mode - Click Start AI Scanning';
+    }
+}
+
+let pendingEntry = null;
+
+function triggerDetection() {
+    if (simulateBtn.classList.contains('scanning')) return;
+
+    pendingEntry = null;
+    simulateBtn.classList.add('scanning');
+    if (scanStatus) scanStatus.innerText = 'Analyzing Vehicle...';
+
+    const isRegistered = Math.random() > 0.15;
+
+    setTimeout(() => {
+        if (!isRegistered) {
+            const randomPlates = ['MH-12 AB-1234', 'TN-01 XX-9999', 'KA-05 ZZ-5544'];
+            const unknownPlate = randomPlates[Math.floor(Math.random() * randomPlates.length)];
+
+            const busTitle = document.getElementById('detectedBusTitle');
+            if (busTitle) busTitle.innerText = "UNAUTHORIZED VEHICLE";
+            if (scannedPlate) scannedPlate.innerText = unknownPlate;
+            if (busRouteInfo) busRouteInfo.innerText = "NOT IN FLEET";
+            if (busDriverName) busDriverName.innerText = "--";
+            if (busCapacity) busCapacity.innerText = "--";
+            if (scanStatus) scanStatus.innerText = 'Access Denied';
+
+            simulateBtn.classList.remove('scanning');
+            showNotification(`Ignored: ${unknownPlate} is not in your fleet.`, 'error');
+            return;
+        }
+
+        let eligibleBuses = fleet;
+        if (currentMode === 'EXIT' && inCampusPlates.size > 0) {
+            eligibleBuses = fleet.filter(b => inCampusPlates.has(convertPlate(b.plate)));
+        } else if (currentMode === 'ENTRY') {
+            eligibleBuses = fleet.filter(b => !inCampusPlates.has(convertPlate(b.plate)));
+        }
+
+        if (eligibleBuses.length === 0) eligibleBuses = fleet;
+
+        const randomBus = eligibleBuses[Math.floor(Math.random() * eligibleBuses.length)];
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const busTitle = document.getElementById('detectedBusTitle');
+        if (busTitle) busTitle.innerText = "Authorized Bus Detected";
+        if (scannedPlate) scannedPlate.innerText = randomBus.plate;
+        if (busRouteInfo) busRouteInfo.innerText = `${randomBus.serial} - ${randomBus.route}`;
+        if (busDriverName) busDriverName.innerText = randomBus.driver || "Authorized Driver";
+        if (busCapacity) busCapacity.innerText = randomBus.capacity || "N/A";
+
+        pendingEntry = {
+            ...randomBus,
+            time: timeStr,
+            type: currentMode,
+            date: now.toLocaleDateString()
+        };
+
+        simulateBtn.classList.remove('scanning');
+        if (scanStatus) scanStatus.innerText = 'Detection Complete. Registering Automatically...';
+
+        setTimeout(() => {
+            if (!pendingEntry) return;
+
+            const registeredPlate = convertPlate(pendingEntry.plate);
+
+            const finalRecord = {
+                ...pendingEntry,
+                plate: registeredPlate,
+                scanner: scanners[0]?.name || 'Gate 1',
+                scannerId: scanners[0]?.id || 'SC001'
+            };
+
+            if (finalRecord.type === 'ENTRY') {
+                inCampusPlates.add(finalRecord.plate);
+            } else {
+                inCampusPlates.delete(finalRecord.plate);
+            }
+
+            logs.unshift(finalRecord);
+            scannedRecords.unshift(finalRecord);
+            saveData();
+            updateUI();
+            updateAdminPanel();
+
+            if (scanStatus) scanStatus.innerText = 'Bus Plate Registered Automatically';
+            showNotification(`Auto-Registered: ${finalRecord.plate}`);
+
+            setTimeout(() => {
+                if (!simulateBtn.classList.contains('scanning')) {
+                    if (scanStatus) scanStatus.innerText = 'Waiting for next scan...';
+                }
+            }, 3000);
+
+            pendingEntry = null;
+        }, 2000);
+
+        showNotification(`Bus ${randomBus.plate} detected. Auto-registering in 2s...`);
+    }, 1500);
+}
+
+// ==================== UTILITIES & DATA MANAGEMENT ====================
+function convertPlate(plate) {
+    return plate.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+}
+
+function saveData() {
+    localStorage.setItem('transit_logs', JSON.stringify(logs));
+    localStorage.setItem('transit_fleet', JSON.stringify(fleet));
+    localStorage.setItem('in_campus_plates', JSON.stringify([...inCampusPlates]));
+    localStorage.setItem('scanned_records', JSON.stringify(scannedRecords));
+    localStorage.setItem('scanner_list', JSON.stringify(scanners));
+}
+
+function checkDailyReset() {
+    const today = new Date().toLocaleDateString();
+    if (currentDateDisplay) currentDateDisplay.innerText = today;
+}
+
+// ==================== UI UPDATES ====================
+function updateUI() {
+    updateLogTable();
+    updateLiveFleet();
+    updateStats();
+}
+
+function updateLogTable() {
+    const today = new Date().toLocaleDateString();
+    const todaysLogs = logs.filter(log => log.date === today);
+
+    if (busLogTableBody) {
+        busLogTableBody.innerHTML = todaysLogs.map(log => `
+            <tr>
+                <td><span class="type-badge type-${log.type.toLowerCase()}">${log.type}</span></td>
+                <td><span class="plate-badge">${log.plate}</span></td>
+                <td>${log.serial}</td>
+                <td>${log.time}</td>
+            </tr>
+        `).join('');
+    }
+}
+
+function updateLiveFleet() {
+    if (!liveFleetList) return;
+    
+    if (inCampusPlates.size === 0) {
+        liveFleetList.innerHTML = '<p class="empty-state">No buses currently inside campus</p>';
+    } else {
+        const insideBuses = fleet.filter(b => inCampusPlates.has(convertPlate(b.plate)));
+        liveFleetList.innerHTML = insideBuses.map(bus => `
+            <div class="live-bus-item">
+                <span class="bus-icon">🚌</span>
+                <div class="bus-info">
+                    <span class="bus-plate">${bus.plate}</span>
+                    <span class="bus-route">${bus.serial} - ${bus.route}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+    if (inCampusBadge) inCampusBadge.innerText = inCampusPlates.size;
+}
+
+function updateStats() {
+    const today = new Date().toLocaleDateString();
+    const todaysLogs = logs.filter(log => log.date === today);
+
+    const entries = todaysLogs.filter(l => l.type === 'ENTRY').length;
+    const exits = todaysLogs.filter(l => l.type === 'EXIT').length;
+
+    if (countInside) countInside.innerText = inCampusPlates.size;
+    if (countTotalEntries) countTotalEntries.innerText = entries;
+    if (countTotalExits) countTotalExits.innerText = exits;
+}
+
+function updateFleetTable() {
+    if (!fleetTableBody) return;
+
+    fleetTableBody.innerHTML = fleet.map(bus => `
+        <tr>
+            <td class="plate-badge">${bus.plate}</td>
+            <td>${bus.serial}</td>
+            <td>${bus.route}</td>
+            <td><button class="btn btn-icon delete-bus" data-plate="${bus.plate}">🗑️</button></td>
+        </tr>
+    `).join('');
+
+    document.querySelectorAll('.delete-bus').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const plate = btn.getAttribute('data-plate');
+            fleet = fleet.filter(b => b.plate !== plate);
+            inCampusPlates.delete(plate);
+            saveData();
+            updateFleetTable();
+            updateUI();
+        });
+    });
+}
+
+function updateAdminPanel() {
+    // Update Scanner List
+    const scannersList = document.getElementById('scannersList');
+    if (scannersList) {
+        scannersList.innerHTML = scanners.map(s => `
+            <div class="item-row">
+                <div class="item-info">
+                    <span class="item-name">${s.name}</span>
+                    <span class="item-meta">${s.location} • ${s.status}</span>
+                </div>
+                <button class="btn btn-icon delete-scanner" data-id="${s.id}">🗑️</button>
+            </div>
+        `).join('');
+
+        document.querySelectorAll('.delete-scanner').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-id');
+                scanners = scanners.filter(s => s.id !== id);
+                saveData();
+                updateAdminPanel();
+            });
+        });
+    }
+
+    // Update Admin Users List
+    const adminUsersList = document.getElementById('adminUsersList');
+    if (adminUsersList) {
+        adminUsersList.innerHTML = admins.map(a => `
+            <div class="item-row">
+                <div class="item-info">
+                    <span class="item-name">${a.id}</span>
+                    <span class="item-meta">Created: ${a.created}</span>
+                </div>
+                ${a.id !== 'admin' ? `<button class="btn btn-icon delete-admin" data-id="${a.id}">🗑️</button>` : '<span class="item-meta">System</span>'}
+            </div>
+        `).join('');
+
+        document.querySelectorAll('.delete-admin').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-id');
+                admins = admins.filter(a => a.id !== id);
+                saveAdmins();
+                updateAdminPanel();
+                showNotification('Admin user deleted');
+            });
+        });
+    }
+
+    // Update Scanned Records Table
+    const scannedRecordsBody = document.getElementById('scannedRecordsBody');
+    if (scannedRecordsBody) {
+        scannedRecordsBody.innerHTML = scannedRecords.slice(0, 50).map(record => `
+            <tr>
+                <td>${record.date}</td>
+                <td>${record.time}</td>
+                <td><span class="plate-badge">${record.plate}</span></td>
+                <td>${record.serial}</td>
+                <td>${record.driver || '--'}</td>
+                <td><span class="type-badge type-${record.type.toLowerCase()}">${record.type}</span></td>
+                <td>${record.scanner || 'System'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Update Stats
+    const today = new Date().toLocaleDateString();
+    const todayScans = scannedRecords.filter(r => r.date === today).length;
+    
+    if (document.getElementById('totalScansToday')) 
+        document.getElementById('totalScansToday').innerText = todayScans;
+    if (document.getElementById('activeScanners')) 
+        document.getElementById('activeScanners').innerText = scanners.length;
+    if (document.getElementById('adminUsersCount')) 
+        document.getElementById('adminUsersCount').innerText = admins.length;
+}
+
+// ==================== NOTIFICATIONS ====================
+function showNotification(message, type = 'success') {
+    const area = document.getElementById('notification-area');
+    const note = document.createElement('div');
+    note.className = `notification ${type}`;
+    note.innerText = message;
+    area.appendChild(note);
+    setTimeout(() => note.classList.add('show'), 10);
+    setTimeout(() => {
+        note.classList.remove('show');
+        setTimeout(() => note.remove(), 500);
+    }, 4000);
+}
+
+// ==================== STARTUP ====================
+// Setup login BEFORE checking auth
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize admins from localStorage
+    admins = JSON.parse(localStorage.getItem('admin_users')) || [
+        { id: 'admin', password: '12345', name: 'System Admin', created: new Date().toLocaleDateString() }
+    ];
+    saveAdmins();
+
+    // Setup login form immediately
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+
+    // Check if user is already logged in
+    checkAuth();
+});
+
+// Auto-scan feature for demo
+setInterval(() => {
+    if (document.hidden || !document.getElementById('bus-entry-view')?.classList.contains('active')) return;
+    if (Math.random() > 0.8) triggerDetection();
+}, 8000);

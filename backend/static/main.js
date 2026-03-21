@@ -136,8 +136,33 @@ async function handleLogin(e) {
 function showDashboard(user) {
     if (DOM.loginModal) DOM.loginModal.classList.add('hidden');
     if (DOM.app) DOM.app.style.display = 'block';
-    if (DOM.loggedUser) DOM.loggedUser.innerText = user.id;
+    if (DOM.loggedUser) DOM.loggedUser.innerText = user.id + (user.role === 'scanner' ? ' (CAMERA)' : ' (ADMIN)');
     showNotification(`Logged in as ${user.id}`, 'success');
+    
+    // Role based visibility
+    if (user.role === 'scanner') {
+        document.querySelectorAll('.nav-links li').forEach(li => {
+            if (li.getAttribute('data-view') !== 'bus-entry') li.style.display = 'none';
+        });
+        // Force monitoring view
+        const targetView = document.getElementById('bus-entry-view');
+        if (targetView) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            targetView.classList.add('active');
+            
+            // HIDE tracking info for scanners
+            const tracking = targetView.querySelector('.tracking-column');
+            if (tracking) tracking.style.display = 'none';
+            // Center the scanner card
+            const grid = targetView.querySelector('.dashboard-grid');
+            if (grid) grid.style.display = 'block';
+        }
+    } else {
+        document.querySelectorAll('.nav-links li').forEach(li => li.style.display = 'block');
+        const tracking = document.querySelector('.tracking-column');
+        if (tracking) tracking.style.display = 'grid'; // Restore
+    }
+
     initializeApp();
 }
 
@@ -288,11 +313,23 @@ async function initAI() {
 }
 
 async function initCamera() {
+    console.log("Initializing camera...");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        let msg = "Camera API not available. This is likely because you are on an insecure 'http' page. Try using 'https' or use Ngrok.";
+        console.error(msg);
+        if (DOM.scanStatus) DOM.scanStatus.innerText = 'HTTPS Required for Camera';
+        alert(msg);
+        return;
+    }
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+        console.log("Camera stream obtained.");
         if (DOM.videoFeed) DOM.videoFeed.srcObject = stream;
         if (DOM.scanStatus) DOM.scanStatus.innerText = 'Monitoring...';
-    } catch (e) { if (DOM.scanStatus) DOM.scanStatus.innerText = 'Camera Access Denied'; }
+    } catch (e) { 
+        console.error("Camera access error:", e);
+        if (DOM.scanStatus) DOM.scanStatus.innerText = 'Camera Access Denied'; 
+    }
 }
 
 function autoScanTask() {

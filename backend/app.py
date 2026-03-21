@@ -60,6 +60,7 @@ def setup_database():
                     id VARCHAR(50) PRIMARY KEY,
                     password VARCHAR(50),
                     name VARCHAR(100),
+                    role VARCHAR(20) DEFAULT 'admin',
                     created DATE
                 )
             """)
@@ -78,8 +79,14 @@ def setup_database():
             cursor.execute("SELECT id FROM admins WHERE id = 'admin'")
             if not cursor.fetchone():
                 print("Setting up default admin account in Supabase...")
-                cursor.execute("INSERT INTO admins (id, password, name, created) VALUES (%s, %s, %s, %s)", 
-                               ('admin', '12345', 'System Admin', datetime.now().date()))
+                cursor.execute("INSERT INTO admins (id, password, name, role, created) VALUES (%s, %s, %s, %s, %s)", 
+                               ('admin', '12345', 'System Admin', 'admin', datetime.now().date()))
+
+            cursor.execute("SELECT id FROM admins WHERE id = 'cam01'")
+            if not cursor.fetchone():
+                print("Setting up default scanner account in Supabase...")
+                cursor.execute("INSERT INTO admins (id, password, name, role, created) VALUES (%s, %s, %s, %s, %s)", 
+                               ('cam01', 'scan123', 'Gate Camera 1', 'scanner', datetime.now().date()))
 
             # Demo fleet
             cursor.execute("SELECT plate FROM fleet LIMIT 1")
@@ -88,7 +95,8 @@ def setup_database():
                 initial_fleet = [
                     ('TN-29 BC-2341', 'B90', 'Dharmapuri', 'M. Senthil', '98450 12345', '55 Seats'),
                     ('TN-30 AC-1122', 'B45', 'Salem', 'R. Kumar', '97890 23456', '48 Seats'),
-                    ('TN-24 BD-5566', 'B12', 'Hosur', 'P. Ravi', '94433 34567', '60 Seats')
+                    ('TN-24 BD-5566', 'B12', 'Hosur', 'P. Ravi', '94433 34567', '60 Seats'),
+                    ('KA-01 AD-9505', 'B85', 'Electronic City', 'M. Reddy', '98765 43210', '52 Seats')
                 ]
                 for bus in initial_fleet:
                     cursor.execute("INSERT INTO fleet VALUES (%s, %s, %s, %s, %s, %s)", bus)
@@ -115,7 +123,7 @@ def api_login():
     if not conn: return jsonify({"error": "DB unreachable"}), 500
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT id, name FROM admins WHERE id = %s AND password = %s", (data['id'], data['password']))
+            cursor.execute("SELECT id, name, role FROM admins WHERE id = %s AND password = %s", (data['id'], data['password']))
             user = cursor.fetchone()
             if user: return jsonify(user)
             return jsonify({"error": "Invalid login"}), 401
@@ -284,5 +292,5 @@ def api_del_scanner_node(id):
 if __name__ == '__main__':
     print("Pre-start: Initializing system using Supabase (PostgreSQL)...")
     setup_database()
-    print("UniTransit Gate Monitoring starting on http://localhost:5000")
-    app.run(debug=True, use_reloader=False, port=5000)
+    print("UniTransit Gate Monitoring starting on http://10.192.3.52:5000")
+    app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5000)

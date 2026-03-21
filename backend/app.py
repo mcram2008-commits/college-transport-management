@@ -15,20 +15,22 @@ CORS(app)
 def get_db_connection():
     db_url = os.environ.get('DATABASE_URL')
     if not db_url:
-        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:5432/postgres'
+        # Using port 6543 (PgBouncer) for better stability on remote connections
+        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:6543/postgres'
         
     try:
-        conn = psycopg2.connect(db_url)
+        # Add a timeout to prevent infinite hanging
+        conn = psycopg2.connect(db_url, connect_timeout=15)
         return conn
     except Exception as e:
-        print(f"PostgreSQL ERROR ({db_url[:20]}...): {e}")
+        print(f"PostgreSQL CONNECTION ERROR: {e}")
         return None
 
 def setup_database():
     print("Checking Supabase database structure...")
     conn = get_db_connection()
     if not conn:
-        print("CRITICAL: Failed to connect to Supabase database. Check your DATABASE_URL.")
+        print("CRITICAL: Failed to connect to Supabase database. System may be offline.")
         return False
         
     try:
@@ -60,12 +62,21 @@ def setup_database():
                 CREATE TABLE IF NOT EXISTS admins (
                     id VARCHAR(50) PRIMARY KEY,
                     password VARCHAR(50),
-                    name VARCHAR(100),
-                    role VARCHAR(20) DEFAULT 'admin',
                     created DATE
                 )
             """)
             
+            # Update admins table if columns are missing
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'admins'")
+            existing_cols = [row[0] for row in cursor.fetchall()]
+            
+            if 'name' not in existing_cols:
+                print("Migrating: Adding 'name' column to admins...")
+                cursor.execute("ALTER TABLE admins ADD COLUMN name VARCHAR(100)")
+            if 'role' not in existing_cols:
+                print("Migrating: Adding 'role' column to admins...")
+                cursor.execute("ALTER TABLE admins ADD COLUMN role VARCHAR(20) DEFAULT 'admin'")
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS scanners (
                     id VARCHAR(20) PRIMARY KEY,
@@ -76,6 +87,9 @@ def setup_database():
                 )
             """)
 
+            conn.commit()
+
+            # Seed data
             # Initial Admin
             cursor.execute("SELECT id FROM admins WHERE id = 'admin'")
             if not cursor.fetchone():
@@ -106,7 +120,8 @@ def setup_database():
             print("Supabase structure OK.")
             return True
     except Exception as e:
-        print(f"Setup error on Supabase: {e}")
+        print(f"Schema update error on Supabase: {e}")
+        conn.rollback()
         return False
     finally:
         conn.close()

@@ -12,7 +12,7 @@ CORS(app)
 
 # Supabase SDK Configuration
 SUPABASE_URL = os.environ.get('SUPABASE_URL') or 'https://enrxeqcobruhimjukanb.supabase.co'
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY') or 'sb_publishable_SStxaO4YFGGwhUne_C87zA_ip9BeHgu'
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVucnhlcWNvYnJ1aGltanVrYW5iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NzkyMTcsImV4cCI6MjA4OTQ1NTIxN30.n2u-7jCkgrwnhC7M017Oi0wqrNudcNNWuS9I2bn5nVQ'
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("CRITICAL: SUPABASE_URL or SUPABASE_KEY missing!")

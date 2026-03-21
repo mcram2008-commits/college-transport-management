@@ -42,6 +42,10 @@ def setup_database():
 def home_page():
     return render_template('index.html')
 
+@app.route('/api/health')
+def health_check():
+    return jsonify({"status": "ok", "time": str(datetime.now())})
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     data = request.json

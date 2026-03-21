@@ -12,15 +12,16 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
 # Supabase Connection (Update your environment variables in Vercel!)
-DB_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:5432/postgres')
-
 def get_db_connection():
+    db_url = os.environ.get('DATABASE_URL')
+    if not db_url:
+        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:5432/postgres'
+        
     try:
-        # Use psycopg2 with the full connection string
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(db_url)
         return conn
     except Exception as e:
-        print(f"PostgreSQL Connection error: {e}")
+        print(f"PostgreSQL ERROR ({db_url[:20]}...): {e}")
         return None
 
 def setup_database():

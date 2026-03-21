@@ -1,129 +1,40 @@
 import os
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 load_dotenv()
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
-# Supabase Connection (Update your environment variables in Vercel!)
-def get_db_connection():
-    db_url = os.environ.get('DATABASE_URL')
-    if not db_url:
-        # Port 6543 + sslmode=require for cloud compatibility
-        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:6543/postgres?sslmode=require'
-        
-    try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
-        return conn
-    except Exception as e:
-        print(f"PostgreSQL CONNECTION ERROR: {e}")
-        return None
+# Supabase SDK Configuration
+SUPABASE_URL = os.environ.get('SUPABASE_URL') or 'https://enrxeqcobruhimjukanb.supabase.co'
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY') or 'sb_publishable_SStxaO4YFGGwhUne_C87zA_ip9BeHgu'
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("CRITICAL: SUPABASE_URL or SUPABASE_KEY missing!")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- DATABASE SETUP (SDK Version) ---
+# Note: SDK doesn't support 'CREATE TABLE' directly via standard client. 
+# We assume tables exist or are created via Supabase Dashboard.
+# For this migration, we'll implement logic that handles missing data gracefully.
 
 def setup_database():
-    print("Checking Supabase database structure...")
-    conn = get_db_connection()
-    if not conn:
-        print("CRITICAL: Failed to connect to Supabase database. System may be offline.")
-        return False
-        
+    print("Checking Supabase connection via SDK...")
     try:
-        with conn.cursor() as cursor:
-            # Tables creation (Postgres syntax)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS fleet (
-                    plate VARCHAR(20) PRIMARY KEY,
-                    serial VARCHAR(20),
-                    route VARCHAR(100),
-                    driver VARCHAR(100),
-                    phone VARCHAR(20),
-                    capacity VARCHAR(20)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS logs (
-                    id SERIAL PRIMARY KEY,
-                    plate VARCHAR(20),
-                    type VARCHAR(10),
-                    date DATE,
-                    time TIME,
-                    FOREIGN KEY (plate) REFERENCES fleet(plate) ON DELETE CASCADE
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS admins (
-                    id VARCHAR(50) PRIMARY KEY,
-                    password VARCHAR(50),
-                    created DATE
-                )
-            """)
-            
-            # Update admins table if columns are missing
-            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'admins'")
-            existing_cols = [row[0] for row in cursor.fetchall()]
-            
-            if 'name' not in existing_cols:
-                print("Migrating: Adding 'name' column to admins...")
-                cursor.execute("ALTER TABLE admins ADD COLUMN name VARCHAR(100)")
-            if 'role' not in existing_cols:
-                print("Migrating: Adding 'role' column to admins...")
-                cursor.execute("ALTER TABLE admins ADD COLUMN role VARCHAR(20) DEFAULT 'admin'")
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS scanners (
-                    id VARCHAR(20) PRIMARY KEY,
-                    name VARCHAR(100),
-                    location VARCHAR(100),
-                    status VARCHAR(20),
-                    added DATE
-                )
-            """)
-
-            conn.commit()
-
-            # Seed data
-            # Initial Admin
-            cursor.execute("SELECT id FROM admins WHERE id = 'admin'")
-            if not cursor.fetchone():
-                print("Setting up default admin account in Supabase...")
-                cursor.execute("INSERT INTO admins (id, password, name, role, created) VALUES (%s, %s, %s, %s, %s)", 
-                               ('admin', '12345', 'System Admin', 'admin', datetime.now().date()))
-
-            cursor.execute("SELECT id FROM admins WHERE id = 'cam01'")
-            if not cursor.fetchone():
-                print("Setting up default scanner account in Supabase...")
-                cursor.execute("INSERT INTO admins (id, password, name, role, created) VALUES (%s, %s, %s, %s, %s)", 
-                               ('cam01', 'scan123', 'Gate Camera 1', 'scanner', datetime.now().date()))
-
-            # Demo fleet
-            cursor.execute("SELECT plate FROM fleet LIMIT 1")
-            if not cursor.fetchone():
-                print("Populating initial bus fleet in Supabase...")
-                initial_fleet = [
-                    ('TN-29 BC-2341', 'B90', 'Dharmapuri', 'M. Senthil', '98450 12345', '55 Seats'),
-                    ('TN-30 AC-1122', 'B45', 'Salem', 'R. Kumar', '97890 23456', '48 Seats'),
-                    ('TN-24 BD-5566', 'B12', 'Hosur', 'P. Ravi', '94433 34567', '60 Seats'),
-                    ('KA-01 AD-9505', 'B85', 'Electronic City', 'M. Reddy', '98765 43210', '52 Seats')
-                ]
-                for bus in initial_fleet:
-                    cursor.execute("INSERT INTO fleet VALUES (%s, %s, %s, %s, %s, %s)", bus)
-            
-            conn.commit()
-            print("Supabase structure OK.")
-            return True
+        # Simple probe to check connectivity
+        supabase.table('admins').select("id").limit(1).execute()
+        print("Supabase SDK connection OK.")
+        return True
     except Exception as e:
-        print(f"Schema update error on Supabase: {e}")
-        conn.rollback()
+        print(f"Supabase SDK Setup Warning: {e}")
+        print("Note: If tables don't exist, please create 'fleet', 'logs', 'admins', 'scanners' in Supabase Dashboard.")
         return False
-    finally:
-        conn.close()
 
 # --- WEB ROUTES ---
 
@@ -134,178 +45,183 @@ def home_page():
 @app.route('/api/login', methods=['POST'])
 def api_login():
     data = request.json
-    conn = get_db_connection()
-    if not conn: return jsonify({"error": "DB unreachable"}), 500
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT id, name, role FROM admins WHERE id = %s AND password = %s", (data['id'], data['password']))
-            user = cursor.fetchone()
-            if user: return jsonify(user)
-            return jsonify({"error": "Invalid login"}), 401
-    finally:
-        conn.close()
+        response = supabase.table('admins')\
+            .select('id, name, role')\
+            .eq('id', data['id'])\
+            .eq('password', data['password'])\
+            .execute()
+        
+        user = response.data[0] if response.data else None
+        if user:
+            return jsonify(user)
+        return jsonify({"error": "Invalid login"}), 401
+    except Exception as e:
+        print(f"Login Error: {e}")
+        return jsonify({"error": "DB unreachable"}), 500
 
 @app.route('/api/fleet', methods=['GET', 'POST'])
 def api_fleet_management():
-    conn = get_db_connection()
-    if not conn: return jsonify({"error": "DB unreachable"}), 500
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            if request.method == 'GET':
-                cursor.execute("SELECT * FROM fleet")
-                return jsonify(cursor.fetchall())
-            
-            data = request.json
-            # Use ON CONFLICT (plate) DO UPDATE for PostgreSQL
-            cursor.execute("""
-                INSERT INTO fleet (plate, serial, route, driver, capacity) 
-                VALUES (%s, %s, %s, %s, %s) 
-                ON CONFLICT (plate) DO UPDATE SET serial=EXCLUDED.serial, route=EXCLUDED.route
-            """, (data['plate'], data['serial'], data['route'], 'Authorized', '50 Seats'))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        if request.method == 'GET':
+            response = supabase.table('fleet').select('*').execute()
+            return jsonify(response.data)
+        
+        data = request.json
+        # Upsert logic (replace check + insert/update)
+        supabase.table('fleet').upsert({
+            "plate": data['plate'],
+            "serial": data['serial'],
+            "route": data['route'],
+            "driver": "Authorized",
+            "capacity": "50 Seats"
+        }).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"Fleet Error: {e}")
+        return jsonify({"error": "DB unreachable"}), 500
 
 @app.route('/api/fleet/<plate>', methods=['DELETE'])
 def api_remove_bus(plate):
-    conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM fleet WHERE plate = %s", (plate,))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        supabase.table('fleet').delete().eq('plate', plate).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/logs', methods=['GET'])
 def api_all_logs():
-    conn = get_db_connection()
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("""
-                SELECT l.*, f.serial, f.route 
-                FROM logs l 
-                LEFT JOIN fleet f ON l.plate = f.plate 
-                ORDER BY l.id DESC LIMIT 50
-            """)
-            rows = cursor.fetchall()
-            for r in rows:
-                r['date'] = str(r['date'])
-                r['time'] = str(r['time'])
-            return jsonify(rows)
-    finally:
-        conn.close()
+        # Join-like query (if relationships are set up in Supabase)
+        # Otherwise, we fetch and merge if needed.
+        # Standard: select logs and reference fleet serial/route
+        response = supabase.table('logs')\
+            .select('*, fleet(serial, route)')\
+            .order('id', desc=True)\
+            .limit(50)\
+            .execute()
+        
+        # Flatten structure for frontend compatibility
+        rows = []
+        for r in response.data:
+            flat = dict(r)
+            if r.get('fleet'):
+                flat['serial'] = r['fleet'].get('serial')
+                flat['route'] = r['fleet'].get('route')
+            rows.append(flat)
+            
+        return jsonify(rows)
+    except Exception as e:
+        print(f"Logs Error: {e}")
+        return jsonify([]), 500
 
 @app.route('/api/register', methods=['POST'])
 def api_register_event():
     data = request.json
     now = datetime.now()
-    conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
-            print(f"DEBUG: Registering event for {data.get('plate')} - {data.get('type')}")
-            cursor.execute("INSERT INTO logs (plate, type, date, time) VALUES (%s,%s,%s,%s)", (data['plate'], data['type'], now.date(), now.time()))
-            conn.commit()
-            return jsonify({"status": "success"})
+        supabase.table('logs').insert({
+            "plate": data['plate'],
+            "type": data['type'],
+            "date": str(now.date()),
+            "time": str(now.time())
+        }).execute()
+        return jsonify({"status": "success"})
     except Exception as e:
-        print(f"DEBUG ERROR: {str(e)}")
+        print(f"Register Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-    finally:
-        conn.close()
 
 @app.route('/api/stats', methods=['GET'])
 def api_system_stats():
-    today = datetime.now().date()
-    conn = get_db_connection()
-    if not conn: return jsonify({"error": "db hanging"}), 500
+    today = str(datetime.now().date())
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT COUNT(*) as count FROM logs WHERE date = %s AND type = 'ENTRY'", (today,))
-            entries = cursor.fetchone()['count']
-            cursor.execute("SELECT COUNT(*) as count FROM logs WHERE date = %s AND type = 'EXIT'", (today,))
-            exits = cursor.fetchone()['count']
-            cursor.execute("SELECT COUNT(*) as count FROM logs WHERE date = %s", (today,))
-            total = cursor.fetchone()['count']
-            cursor.execute("""
-                SELECT COUNT(*) as count FROM (
-                    SELECT plate, SUM(CASE WHEN type = 'ENTRY' THEN 1 ELSE -1 END) as net 
-                    FROM logs GROUP BY plate HAVING SUM(CASE WHEN type = 'ENTRY' THEN 1 ELSE -1 END) > 0
-                ) t
-            """)
-            inside = cursor.fetchone()['count']
-            cursor.execute("SELECT COUNT(*) as count FROM scanners")
-            scanners = cursor.fetchone()['count']
-            cursor.execute("SELECT COUNT(*) as count FROM admins")
-            admins = cursor.fetchone()['count']
-            return jsonify({"entries": entries, "exits": exits, "total_today": total, "inside": inside, "scanners": scanners, "admins": admins})
-    finally:
-        conn.close()
+        # Entries
+        entries = supabase.table('logs').select('id', count='exact').eq('date', today).eq('type', 'ENTRY').execute().count
+        # Exits
+        exits = supabase.table('logs').select('id', count='exact').eq('date', today).eq('type', 'EXIT').execute().count
+        # Total
+        total = supabase.table('logs').select('id', count='exact').eq('date', today).execute().count
+        # Inside (approx based on net count > 0 per plate)
+        # For simplicity in SDK, we'll return fixed or calculate
+        inside_res = supabase.table('logs').select('plate, type').execute()
+        net_counts = {}
+        for l in inside_res.data:
+            p = l['plate']
+            net_counts[p] = net_counts.get(p, 0) + (1 if l['type'] == 'ENTRY' else -1)
+        inside = sum(1 for v in net_counts.values() if v > 0)
+        
+        scanners = supabase.table('scanners').select('id', count='exact').execute().count
+        admins = supabase.table('admins').select('id', count='exact').execute().count
+        
+        return jsonify({
+            "entries": entries, 
+            "exits": exits, 
+            "total_today": total, 
+            "inside": inside, 
+            "scanners": scanners, 
+            "admins": admins
+        })
+    except Exception as e:
+        print(f"Stats Error: {e}")
+        return jsonify({"error": "db hanging"}), 500
 
 @app.route('/api/admins', methods=['GET', 'POST'])
 def api_staff_list():
-    conn = get_db_connection()
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            if request.method == 'GET':
-                cursor.execute("SELECT id, name, created FROM admins")
-                res = cursor.fetchall()
-                for r in res: r['created'] = str(r['created'])
-                return jsonify(res)
-            
-            data = request.json
-            cursor.execute("INSERT INTO admins (id, password, name, created) VALUES (%s,%s,%s,%s)", 
-                           (data['id'], data['password'], data['id'], datetime.now().date()))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        if request.method == 'GET':
+            response = supabase.table('admins').select('id, name, created').execute()
+            return jsonify(response.data)
+        
+        data = request.json
+        supabase.table('admins').insert({
+            "id": data['id'],
+            "password": data['password'],
+            "name": data['id'], # Default name as ID
+            "created": str(datetime.now().date())
+        }).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admins/<id>', methods=['DELETE'])
 def api_fire_staff(id):
     if id == 'admin': return jsonify({"error": "system"}), 400
-    conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM admins WHERE id=%s", (id,))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        supabase.table('admins').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/scanners', methods=['GET', 'POST'])
 def api_scanner_nodes():
-    conn = get_db_connection()
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            if request.method == 'GET':
-                cursor.execute("SELECT * FROM scanners")
-                res = cursor.fetchall()
-                for r in res: r['added'] = str(r['added'])
-                return jsonify(res)
-            
-            data = request.json
-            s_id = 'SC' + datetime.now().strftime('%f')[:5]
-            cursor.execute("INSERT INTO scanners (id, name, location, status, added) VALUES (%s,%s,%s,%s,%s)", 
-                           (s_id, data['name'], data['location'], 'Active', datetime.now().date()))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        if request.method == 'GET':
+            response = supabase.table('scanners').select('*').execute()
+            return jsonify(response.data)
+        
+        data = request.json
+        s_id = 'SC' + datetime.now().strftime('%f')[:5]
+        supabase.table('scanners').insert({
+            "id": s_id,
+            "name": data['name'],
+            "location": data['location'],
+            "status": "Active",
+            "added": str(datetime.now().date())
+        }).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/scanners/<id>', methods=['DELETE'])
 def api_del_scanner_node(id):
-    conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM scanners WHERE id=%s", (id,))
-            conn.commit()
-            return jsonify({"success": True})
-    finally:
-        conn.close()
+        supabase.table('scanners').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("Pre-start: Initializing system using Supabase (PostgreSQL)...")
     setup_database()
-    print("UniTransit Gate Monitoring starting on http://10.192.3.52:5000")
+    print("UniTransit Gate Monitoring (HTTP SDK Mode) starting on port 5000")
+    # Bind to 0.0.0.0 for Vercel and local network access
     app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5000)

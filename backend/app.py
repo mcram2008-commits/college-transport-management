@@ -15,11 +15,10 @@ CORS(app)
 def get_db_connection():
     db_url = os.environ.get('DATABASE_URL')
     if not db_url:
-        # Using port 6543 (PgBouncer) for better stability on remote connections
-        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:6543/postgres'
+        # Port 6543 + sslmode=require for cloud compatibility
+        db_url = 'postgresql://postgres:gdJpFtONAreX11dK@db.enrxeqcobruhimjukanb.supabase.co:6543/postgres?sslmode=require'
         
     try:
-        # Add a timeout to prevent infinite hanging
         conn = psycopg2.connect(db_url, connect_timeout=15)
         return conn
     except Exception as e:
